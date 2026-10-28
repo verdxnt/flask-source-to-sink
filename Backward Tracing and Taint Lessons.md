@@ -127,7 +127,37 @@ With 3-5 hours a week, I need to choose and be able to justify it.
 
 These are the cases my tool can't always tell apart, which is the talking point.
 
+## 9. SSTI (server-side template injection)
+
+**Bug:** `'''...%s...''' % request.url` pastes client input into template *text* before `render_template_string` parses it. `{{ 7*7 }}` in the URL runs as code. Impact is remote code execution, because Jinja can reach Python objects and the OS.
+
+**Chain (404 handler):**
+
+```
+source:     line 112  request.url
+sanitizer:  none
+hop:        lines 103-112  (% formatting)
+sink:       line 114  render_template_string(template, ...)
+```
+
+The source is the `request.url` read on line 112, not line 103 where the statement starts.
+
+**Fix:** context parameter passing. Fixed template text, and the value is passed as a variable:
+
+```python
+render_template_string(template, current_url=request.url)   # template has {{ current_url }}
+```
+
+**Why it works:** order. Jinja parses the template first, then fills in values as plain text, so a value is never parsed as template code. Flask also autoescapes HTML in values.
+
+**Principle:** data goes in the context, never in the template string. It's the same idea as a parameterized SQL query: separate code from data.
+
+**Terms to use:** separating code from data, context parameter passing, autoescaping. ("Argument hardening" isn't an established term, so don't use it.)
+
+**Mistakes I made:** left `% request.url` after switching to `{{ }}`; used an undefined variable `user_input`; kept `dir`, `help` and `locals` that the template never used; left a dangling `%` that was a syntax error.
+
 ## Open items
-- [ ] Trace the second flow in `/search`: `str(e)` on line 280 into `render_template_string`.
-- [ ] Trace the `/` 404 handler (line 114).
-- [ ] Add the yaml chain to `Source-to-sink-log.md`.
+- [ ] Trace the second flow in `/search`: `str(e)` on line 280 into `render_template_string` (same mistake as the 404 handler).
+- [x] Trace the 404 handler (line 114).
+- [x] Add the yaml chain to `Source-to-sink-log.md`.
+- [ ] Update the README so the rule engine lives in a separate `sast-tool` repo.
