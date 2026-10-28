@@ -90,3 +90,41 @@ ydata = yaml.safe_load(y)
 - A tool that follows variable names loses the trail between `f.save` (324) and `open` (326), because the only link is the path string. That's a false negative to design around.
 - My first sink list missed `.save(`, so a sink list only finds what's on it.
 - My grep also matched line 175, a docstring, which is a false positive from text search.
+
+---
+
+## 404 handler `pnf` (`@app.errorhandler(404)`)
+
+**Vulnerability:** Server-side template injection (SSTI)
+
+### Chain (original code)
+
+```
+source:     line 112   (request.url, the URL the client requested)
+sanitizer:  none
+hop:        lines 103-112   (% formatting pastes the URL into the template text)
+sink:       line 114   (render_template_string(template, ...))
+```
+
+### Explanation
+
+The URL is pasted into the template *text* before `render_template_string` parses it, so Jinja reads the attacker's input as template code. A URL containing `{{ 7*7 }}` renders as `49`. Jinja runs inside the Python process, so the attacker can reach Python objects and from there the operating system, which makes this remote code execution. Passing `dir`, `help` and `locals` into the template gave that code more to work with.
+
+It has the same shape as the `/search` SQL injection: a `%` builds a command out of client text, and an interpreter (here Jinja, there the database) then runs it.
+
+### Fix
+
+Context parameter passing. The template text is fixed, and the value is passed as a variable:
+
+```python
+template = '''... <h3> {{ current_url }}</h3> ...'''
+return render_template_string(template, current_url=request.url), 404
+```
+
+### What I learned from this trace
+
+- The source is the `request.url` read on line 112, not line 103 where the statement starts.
+- Order is the reason the fix works: Jinja parses the template first and fills in values afterward as plain text, so a value is never parsed as template code. Flask also autoescapes HTML in values.
+- Principle: data goes in the context, never in the template string. It's the same idea as a parameterized SQL query.
+- My first fix attempt left `% request.url` after switching to `{{ }}`, used an undefined variable (`user_input`), and kept `dir`, `help` and `locals` that the template never used.
+- The same mistake is on line 280 in `/search` (`str(e)` pasted into a template string), which is still to be traced.
