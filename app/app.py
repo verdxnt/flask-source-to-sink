@@ -106,12 +106,12 @@ def pnf(e):
     </head>
     <body>
     <h1>Oops that page doesn't exist!!</h1>
-    <h3> {{ current_url }}</h3>
+    <h3>%s</h3>
     </body>
     </html>
-    ''' 
+    ''' % request.url
 
-    return render_template_string(template, current_url=request.url),404
+    return render_template_string(template, dir = dir, help = help, locals = locals),404
 
 def has_no_empty_params(rule):
     default = rule.defaults if rule.defaults is not None else ()
